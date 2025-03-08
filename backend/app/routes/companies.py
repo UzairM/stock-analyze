@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException, status, Body, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, status, Body, File, UploadFile, Depends
 from fastapi.encoders import jsonable_encoder
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, date
+from pydantic import BaseModel
 
 from app.database.connection import get_database
 from app.models.company import Company, CompanyCreate, CompanyUpdate
@@ -19,6 +20,14 @@ router = APIRouter(
     tags=["companies"],
     responses={404: {"description": "Not found"}},
 )
+
+# Define a response model for the CSV upload endpoint
+class CSVUploadResponse(BaseModel):
+    status: str
+    companies_added: int
+    companies_updated: int
+    errors: List[str]
+    message: str
 
 @router.get("/", response_model=List[Company])
 async def get_companies():
@@ -166,7 +175,7 @@ async def delete_company(company_id: str):
     
     return None
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/upload", status_code=status.HTTP_201_CREATED, response_model=CSVUploadResponse)
 async def upload_companies_csv(file: UploadFile = File(...)):
     """
     Upload a CSV file containing company data.
@@ -274,12 +283,16 @@ async def upload_companies_csv(file: UploadFile = File(...)):
                              'ebitda', 'operatingMargins', 'returnOnAssets', 'returnOnEquity',
                              'currentPrice', 'targetHighPrice', 'targetLowPrice', 
                              'targetMeanPrice', 'recommendationMean']:
-                    if field in company_data and company_data[field]:
-                        try:
-                            company_data[field] = float(company_data[field])
-                        except ValueError:
-                            logger.warning(f"Could not convert {field} to float: {company_data[field]}")
+                    if field in company_data:
+                        # Check if the value is an empty string or None
+                        if not company_data[field] or company_data[field] == '':
                             company_data[field] = None
+                        else:
+                            try:
+                                company_data[field] = float(company_data[field])
+                            except ValueError:
+                                logger.warning(f"Could not convert {field} to float: {company_data[field]}")
+                                company_data[field] = None
                 
                 # Check if company already exists
                 existing_company = await db.companies.find_one({"ticker": company_data['ticker']})
