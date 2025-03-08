@@ -185,9 +185,10 @@ async def upload_companies_csv(file: UploadFile = File(...)):
     # Read the CSV file
     contents = await file.read()
     
-    # Decode the CSV file
+    # Decode the CSV file and handle BOM character
     try:
-        csv_text = contents.decode('utf-8')
+        # Decode with UTF-8 and remove BOM if present
+        csv_text = contents.decode('utf-8-sig')
         csv_reader = csv.DictReader(io.StringIO(csv_text))
         
         # Process each row
@@ -195,13 +196,31 @@ async def upload_companies_csv(file: UploadFile = File(...)):
         companies_updated = 0
         errors = []
         
+        # Clean up fieldnames to remove any BOM characters
+        clean_fieldnames = [field.strip().replace('\ufeff', '') for field in csv_reader.fieldnames]
+        # Create a mapping from clean fieldnames to original fieldnames
+        field_mapping = {clean: original for clean, original in zip(clean_fieldnames, csv_reader.fieldnames)}
+        
         # Log CSV headers
-        logger.info(f"CSV headers: {csv_reader.fieldnames}")
+        logger.info(f"CSV headers: {clean_fieldnames}")
         
         for row in csv_reader:
             try:
-                # Clean up the row data
-                company_data = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items() if k}
+                # Create a new cleaned row with BOM-free keys
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Skip empty keys
+                    if not key:
+                        continue
+                        
+                    # Clean the key (remove BOM and whitespace)
+                    clean_key = key.strip().replace('\ufeff', '')
+                    
+                    # Add to cleaned row with cleaned value
+                    cleaned_row[clean_key] = value.strip() if isinstance(value, str) else value
+                
+                # Use the cleaned row data
+                company_data = cleaned_row
                 
                 # Log the company data
                 logger.info(f"Processing company data: {company_data}")
