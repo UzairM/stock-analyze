@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
+from bson import ObjectId
+
+# Helper for ObjectId conversion
+def str_to_object_id(id_str: str) -> ObjectId:
+    return ObjectId(id_str)
 
 class StockBase(BaseModel):
     """Base model for stock data."""
@@ -15,13 +20,19 @@ class StockCreate(StockBase):
 
 class StockInDB(StockBase):
     """Model for stock data as stored in the database."""
-    id: str = Field(..., description="MongoDB ObjectID")
+    id: str = Field(..., alias="_id", description="MongoDB ObjectID")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        json_encoders = {ObjectId: str}
 
 class Stock(StockInDB):
     """Model for stock data returned to the client."""
-    pass
+    class Config:
+        populate_by_name = True
+        json_encoders = {ObjectId: str}
 
 class StockUpdate(BaseModel):
     """Model for updating stock data."""

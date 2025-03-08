@@ -28,6 +28,7 @@ htmlcov/
 .venv/
 venv/
 ENV/
+backend/venv/
 
 # Node.js
 node_modules/

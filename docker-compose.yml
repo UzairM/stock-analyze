@@ -42,7 +42,7 @@ services:
     container_name: frontend
     restart: always
     ports:
-      - "3000:3000"
+      - "80:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -58,4 +58,4 @@ networks:
     driver: bridge
 
 volumes:
-  mongo_data: 
+  mongo_data:
