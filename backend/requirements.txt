@@ -7,4 +7,8 @@ pydantic-core==2.16.2
 python-dotenv>=1.0.0
 python-multipart>=0.0.7
 pytest>=7.4.0
-httpx>=0.25.0 
+httpx>=0.25.0
+celery>=5.3.6
+redis>=5.0.1
+sec-edgar-api>=0.1.0
+openai>=1.12.0 

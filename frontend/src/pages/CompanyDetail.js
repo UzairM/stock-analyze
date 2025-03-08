@@ -10,6 +10,8 @@ const CompanyDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState(null);
+  const [pollingInterval, setPollingInterval] = useState(null);
 
   useEffect(() => {
     const fetchCompanyData = async () => {
@@ -33,20 +35,91 @@ const CompanyDetail = () => {
     fetchCompanyData();
   }, [id]);
 
+  // Effect to handle polling for analysis status
+  useEffect(() => {
+    // Clean up polling interval when component unmounts
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+  const pollAnalysisStatus = async (taskId) => {
+    try {
+      const response = await axios.get(`${API_URL}/analyses/status/${taskId}`);
+      setAnalysisStatus(response.data);
+      
+      // If the analysis is completed, stop polling and update analyses
+      if (response.data.status === 'COMPLETED') {
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          setPollingInterval(null);
+        }
+        
+        setAnalyzing(false);
+        
+        if (response.data.analysis) {
+          // Add the completed analysis to the analyses list
+          setAnalyses(prevAnalyses => [response.data.analysis, ...prevAnalyses]);
+        } else if (response.data.analysis_id) {
+          // If we only get the analysis ID, fetch the complete analysis
+          const analysisResponse = await axios.get(`${API_URL}/analyses/${response.data.analysis_id}`);
+          setAnalyses(prevAnalyses => [analysisResponse.data, ...prevAnalyses]);
+        }
+      } else if (response.data.status === 'FAILED') {
+        // If the analysis failed, stop polling and show error
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          setPollingInterval(null);
+        }
+        
+        setAnalyzing(false);
+        setError(`Analysis failed: ${response.data.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error polling analysis status:', err);
+      // Don't stop polling on error, it might be temporary
+    }
+  };
+
   const handleAnalyze = async () => {
     try {
       setAnalyzing(true);
+      setError(null);
+      setAnalysisStatus({ status: 'STARTING', message: 'Starting analysis...' });
+      
       const response = await axios.post(`${API_URL}/analyses/`, {
         company_id: id,
         filings_analyzed: ['8-K', '10-K', '10-Q']
       });
       
-      // Add the new analysis to the analyses array
-      setAnalyses([response.data, ...analyses]);
-      setAnalyzing(false);
+      // If we get a task_id, set up polling
+      if (response.data && response.data.task_id) {
+        setAnalysisStatus({
+          status: 'PENDING',
+          task_id: response.data.task_id,
+          message: response.data.message || 'Analysis in progress...'
+        });
+        
+        // Start polling for status every 2 seconds
+        const interval = setInterval(() => {
+          pollAnalysisStatus(response.data.task_id);
+        }, 2000);
+        
+        setPollingInterval(interval);
+      } else {
+        // If no task_id, treat as immediate completion
+        setAnalyzing(false);
+        // Add the new analysis to the analyses array if it's provided in the response
+        if (response.data && response.data._id) {
+          setAnalyses(prevAnalyses => [response.data, ...prevAnalyses]);
+        }
+      }
     } catch (err) {
-      setError('Error performing analysis: ' + err.message);
+      setError('Error performing analysis: ' + (err.response?.data?.detail || err.message));
       setAnalyzing(false);
+      setAnalysisStatus(null);
     }
   };
 
@@ -142,7 +215,15 @@ const CompanyDetail = () => {
       <div className="analysis-section">
         <h2>Analysis</h2>
         
-        {latestAnalysis ? (
+        {analyzing && analysisStatus && (
+          <div className="analysis-status">
+            <h3>Analysis in Progress</h3>
+            <p><strong>Status:</strong> {analysisStatus.status}</p>
+            {analysisStatus.message && <p>{analysisStatus.message}</p>}
+          </div>
+        )}
+        
+        {!analyzing && latestAnalysis ? (
           <div className="analysis-result">
             <h3>Latest Analysis ({new Date(latestAnalysis.analysis_date).toLocaleDateString()})</h3>
             <div className="analysis-details">
@@ -160,7 +241,7 @@ const CompanyDetail = () => {
               </div>
             </div>
           </div>
-        ) : (
+        ) : !analyzing && (
           <div className="no-analysis">
             <p>No analysis performed yet.</p>
           </div>

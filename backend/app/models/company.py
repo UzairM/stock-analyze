@@ -1,11 +1,22 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, validator
+from typing import Optional, Union, Any
 from datetime import date, datetime
 from bson import ObjectId
 
 # Helper for ObjectId conversion
 def str_to_object_id(id_str: str) -> ObjectId:
     return ObjectId(id_str)
+
+# Custom validator for dates that might be "Unknown"
+def validate_date(v: Any) -> Optional[date]:
+    if v is None or v == "" or v == "Unknown":
+        return None
+    if isinstance(v, date):
+        return v
+    try:
+        return datetime.strptime(v, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
 
 # Base Company model
 class CompanyBase(BaseModel):
@@ -17,7 +28,7 @@ class CompanyBase(BaseModel):
     exchange: Optional[str] = Field(None, description="Stock exchange")
     market_cap: Optional[float] = Field(None, description="Market capitalization")
     employees: Optional[int] = Field(None, description="Number of employees")
-    incorporation_date: Optional[date] = Field(None, description="Date of incorporation")
+    incorporation_date: Optional[Union[date, str]] = Field(None, description="Date of incorporation")
     website: Optional[str] = Field(None, description="Company website")
     
     # Financial metrics
@@ -34,6 +45,9 @@ class CompanyBase(BaseModel):
     targetLowPrice: Optional[float] = Field(None, description="Target low price")
     targetMeanPrice: Optional[float] = Field(None, description="Target mean price")
     recommendationMean: Optional[float] = Field(None, description="Recommendation mean")
+    
+    # Custom validator for incorporation_date
+    _normalize_date = validator('incorporation_date', pre=True, allow_reuse=True)(validate_date)
 
 # Model for creating a company
 class CompanyCreate(CompanyBase):
@@ -45,6 +59,12 @@ class CompanyInDB(CompanyBase):
     cik: Optional[str] = Field(None, description="SEC Central Index Key")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    @validator('id', pre=True)
+    def objectid_to_str(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
     
     class Config:
         populate_by_name = True
@@ -95,7 +115,7 @@ class CompanyUpdate(BaseModel):
     exchange: Optional[str] = None
     market_cap: Optional[float] = None
     employees: Optional[int] = None
-    incorporation_date: Optional[date] = None
+    incorporation_date: Optional[Union[date, str]] = None
     website: Optional[str] = None
     totalRevenue: Optional[float] = None
     grossProfits: Optional[float] = None
@@ -108,4 +128,7 @@ class CompanyUpdate(BaseModel):
     targetLowPrice: Optional[float] = None
     targetMeanPrice: Optional[float] = None
     recommendationMean: Optional[float] = None
-    cik: Optional[str] = None 
+    cik: Optional[str] = None
+    
+    # Custom validator for incorporation_date
+    _normalize_date = validator('incorporation_date', pre=True, allow_reuse=True)(validate_date) 
