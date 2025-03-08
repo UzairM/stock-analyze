@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from celery import Task
 import time
+import traceback
+import sys
 
 from .celery_app import celery_app
 from .sec_edgar import get_company_filings_text
@@ -21,7 +23,9 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout,
+    force=True
 )
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,14 @@ DB_NAME = os.getenv("DB_NAME", "biotech_analysis_db")
 # OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
+
+# Print environment info at startup for debugging
+logger.info(f"🔧 ENVIRONMENT SETUP:")
+logger.info(f"MONGO_URL: {MONGO_URL}")
+logger.info(f"DB_NAME: {DB_NAME}")
+logger.info(f"OPENAI_API_KEY: {'Set' if OPENAI_API_KEY else 'Not set'}")
+logger.info(f"REDIS_URL: {os.getenv('REDIS_URL', 'Not set')}")
+logger.info(f"Current directory: {os.getcwd()}")
 
 class DatabaseTask(Task):
     """Custom Celery Task that maintains a database connection."""
@@ -57,31 +69,50 @@ def analyze_company_sec_filings(self, company_id, filings_types=None):
     Returns:
         str: ID of the created analysis document
     """
+    logger.info(f"💥 TASK RECEIVED: analyze_company_sec_filings({company_id}, {filings_types})")
+    
     task_start_time = time.time()
     logger.info(f"🚀 TASK STARTED: Analysis task for company ID: {company_id}")
     logger.info(f"Filing types to analyze: {filings_types or ['8-K', '10-K', '10-Q']}")
     
+    # Add more debug info
+    logger.info(f"Task ID: {self.request.id}")
+    logger.info(f"Task name: {self.name}")
+    
     # Update task state to STARTED
-    self.update_state(state='STARTED', meta={'status': 'Started processing'})
+    try:
+        self.update_state(state='STARTED', meta={'status': 'Started processing'})
+    except Exception as e:
+        logger.error(f"Error updating task state: {str(e)}")
     
     if filings_types is None:
         filings_types = ["8-K", "10-K", "10-Q"]
     
     # Convert to ObjectId
-    company_oid = ObjectId(company_id)
+    try:
+        company_oid = ObjectId(company_id)
+    except Exception as e:
+        logger.error(f"Invalid company ID format: {company_id} - {str(e)}")
+        return None
     
     # Create a synchronous client for the task
-    client = AsyncIOMotorClient(MONGO_URL)
-    db = client[DB_NAME]
+    try:
+        client = AsyncIOMotorClient(MONGO_URL)
+        db = client[DB_NAME]
+        logger.info(f"✅ Connected to MongoDB: {MONGO_URL}")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {str(e)}")
+        return None
     
     try:
         # Get company from database
+        logger.info(f"🔍 Looking up company with ID: {company_id}")
         company = db.companies.find_one({"_id": company_oid})
         if not company:
             logger.error(f"❌ Company with ID {company_id} not found")
             return None
         
-        logger.info(f"📊 Processing company: {company['name']} (Ticker: {company['ticker']})")
+        logger.info(f"📊 Processing company: {company.get('name', 'Unknown')} (Ticker: {company.get('ticker', 'Unknown')})")
         
         # Get company CIK
         cik = company.get("cik")
@@ -89,23 +120,26 @@ def analyze_company_sec_filings(self, company_id, filings_types=None):
             logger.error(f"❌ Company with ID {company_id} does not have a CIK")
             return None
         
-        logger.info(f"🔍 Found CIK: {cik} for company {company['name']}")
+        logger.info(f"🔍 Found CIK: {cik} for company {company.get('name')}")
         
         # Update task state
-        self.update_state(state='PROGRESS', meta={
-            'status': 'Fetching SEC filings',
-            'company': company['name'],
-            'progress': 25
-        })
+        try:
+            self.update_state(state='PROGRESS', meta={
+                'status': 'Fetching SEC filings',
+                'company': company.get('name'),
+                'progress': 25
+            })
+        except Exception as e:
+            logger.error(f"Error updating task state: {str(e)}")
         
         # Get the company filings text
         sec_start_time = time.time()
-        logger.info(f"📥 DOWNLOADING: Fetching SEC filings for company {company['name']} (CIK: {cik})")
+        logger.info(f"📥 DOWNLOADING: Fetching SEC filings for company {company.get('name')} (CIK: {cik})")
         filings_text = get_company_filings_text(cik, filings_types, lookback_days=365)
         sec_end_time = time.time()
         
         if not filings_text:
-            logger.warning(f"⚠️ No filings found for company {company['name']} (CIK: {cik})")
+            logger.warning(f"⚠️ No filings found for company {company.get('name')} (CIK: {cik})")
             
             # Create analysis document with error
             analysis_doc = {
@@ -137,21 +171,24 @@ def analyze_company_sec_filings(self, company_id, filings_types=None):
             logger.info(f"  - {filing_type}: {len(text)} characters")
         
         # Update task state
-        self.update_state(state='PROGRESS', meta={
-            'status': 'Analyzing filings with LLM',
-            'company': company['name'],
-            'filings': list(filings_text.keys()),
-            'progress': 50
-        })
+        try:
+            self.update_state(state='PROGRESS', meta={
+                'status': 'Analyzing filings with LLM',
+                'company': company.get('name'),
+                'filings': list(filings_text.keys()),
+                'progress': 50
+            })
+        except Exception as e:
+            logger.error(f"Error updating task state: {str(e)}")
         
         # Use LLM to analyze filings
         llm_start_time = time.time()
-        logger.info(f"🧠 ANALYZING: Using LLM to analyze SEC filings for company {company['name']}")
-        analysis_result = analyze_filings_with_llm(company['name'], filings_text)
+        logger.info(f"🧠 ANALYZING: Using LLM to analyze SEC filings for company {company.get('name')}")
+        analysis_result = analyze_filings_with_llm(company.get('name'), filings_text)
         llm_end_time = time.time()
         
         if not analysis_result:
-            logger.error(f"❌ Failed to analyze filings for company {company['name']} with LLM")
+            logger.error(f"❌ Failed to analyze filings for company {company.get('name')} with LLM")
             
             # Create analysis document with error
             analysis_doc = {
@@ -180,11 +217,14 @@ def analyze_company_sec_filings(self, company_id, filings_types=None):
             }
         
         # Update task state
-        self.update_state(state='PROGRESS', meta={
-            'status': 'Saving analysis results',
-            'company': company['name'],
-            'progress': 90
-        })
+        try:
+            self.update_state(state='PROGRESS', meta={
+                'status': 'Saving analysis results',
+                'company': company.get('name'),
+                'progress': 90
+            })
+        except Exception as e:
+            logger.error(f"Error updating task state: {str(e)}")
         
         # Insert analysis into the database
         result = db.analyses.insert_one(analysis_doc)
@@ -197,8 +237,12 @@ def analyze_company_sec_filings(self, company_id, filings_types=None):
         return analysis_id
         
     except Exception as e:
-        logger.error(f"❌ ERROR: Analysis failed for company {company_id}: {str(e)}", exc_info=True)
+        logger.error(f"❌ ERROR: Analysis failed for company {company_id}: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise
     finally:
         # Close the client
-        client.close() 
+        try:
+            client.close()
+        except:
+            pass 
