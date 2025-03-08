@@ -18,6 +18,17 @@ def validate_date(v: Any) -> Optional[date]:
     except (ValueError, TypeError):
         return None
 
+# Custom validator for numeric fields that might be empty strings
+def validate_numeric(v: Any) -> Optional[float]:
+    if v is None or v == "" or v == "Unknown":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None
+
 # Base Company model
 class CompanyBase(BaseModel):
     ticker: str = Field(..., description="Company ticker symbol")
@@ -48,6 +59,21 @@ class CompanyBase(BaseModel):
     
     # Custom validator for incorporation_date
     _normalize_date = validator('incorporation_date', pre=True, allow_reuse=True)(validate_date)
+    
+    # Custom validators for numeric fields
+    _normalize_market_cap = validator('market_cap', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_employees = validator('employees', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_total_revenue = validator('totalRevenue', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_gross_profits = validator('grossProfits', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_ebitda = validator('ebitda', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_operating_margins = validator('operatingMargins', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_return_on_assets = validator('returnOnAssets', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_return_on_equity = validator('returnOnEquity', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_current_price = validator('currentPrice', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_target_high_price = validator('targetHighPrice', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_target_low_price = validator('targetLowPrice', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_target_mean_price = validator('targetMeanPrice', pre=True, allow_reuse=True)(validate_numeric)
+    _normalize_recommendation_mean = validator('recommendationMean', pre=True, allow_reuse=True)(validate_numeric)
 
 # Model for creating a company
 class CompanyCreate(CompanyBase):
