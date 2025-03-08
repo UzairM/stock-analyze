@@ -17,9 +17,9 @@
 
 4. **Configure Database**  
   - [x] Set up a local or hosted MongoDB instance  
-  - [ ] Decide on DB name (e.g., `biotech_analysis_db`) and create it  
-  - [ ] Verify connectivity with a test script or Mongo shell  
+  - [x] Decide on DB name (e.g., `biotech_analysis_db`) and create it  
+  - [x] Verify connectivity with a test script or Mongo shell  
 
 5. **Set Up Repo Structure**  
  
-  - [ ] Document initial instructions in `README.md`  
+  - [x] Document initial instructions in `README.md`  
