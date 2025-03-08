@@ -187,47 +187,84 @@ async def upload_companies_csv(file: UploadFile = File(...)):
     
     # Decode the CSV file and handle BOM character
     try:
-        # Decode with UTF-8 and remove BOM if present
-        csv_text = contents.decode('utf-8-sig')
-        csv_reader = csv.DictReader(io.StringIO(csv_text))
+        # Check for BOM and remove it if present
+        if contents.startswith(b'\xef\xbb\xbf'):  # UTF-8 BOM
+            logger.info("BOM detected in CSV file, removing it")
+            contents = contents[3:]
+            
+        # Decode with standard UTF-8 since we manually handled the BOM
+        csv_text = contents.decode('utf-8')
+        
+        # Print raw CSV for debugging
+        logger.debug(f"Raw CSV content (first 200 chars): {csv_text[:200]}")
+        
+        # Create StringIO buffer for CSV reader
+        csv_buffer = io.StringIO(csv_text)
+        
+        # Read the first line to get headers
+        header_line = csv_buffer.readline().strip()
+        logger.info(f"Header line: {header_line}")
+        
+        # Reset buffer position
+        csv_buffer.seek(0)
+        
+        # Create CSV reader
+        csv_reader = csv.DictReader(csv_buffer)
+        
+        # Get and fix fieldnames
+        fieldnames = csv_reader.fieldnames
+        if fieldnames and fieldnames[0].startswith('\ufeff'):
+            logger.info(f"Found BOM in first fieldname: {repr(fieldnames[0])}")
+            fieldnames[0] = fieldnames[0].replace('\ufeff', '')
+            # Create a new reader with fixed fieldnames
+            csv_buffer.seek(0)
+            next(csv_buffer)  # Skip header
+            csv_reader = csv.DictReader(csv_buffer, fieldnames=fieldnames)
         
         # Process each row
         companies_added = 0
         companies_updated = 0
         errors = []
         
-        # Clean up fieldnames to remove any BOM characters
-        clean_fieldnames = [field.strip().replace('\ufeff', '') for field in csv_reader.fieldnames]
-        # Create a mapping from clean fieldnames to original fieldnames
-        field_mapping = {clean: original for clean, original in zip(clean_fieldnames, csv_reader.fieldnames)}
-        
         # Log CSV headers
-        logger.info(f"CSV headers: {clean_fieldnames}")
+        logger.info(f"CSV headers after cleaning: {fieldnames}")
         
-        for row in csv_reader:
+        for idx, row in enumerate(csv_reader):
             try:
-                # Create a new cleaned row with BOM-free keys
-                cleaned_row = {}
+                # Print raw row for debugging
+                logger.debug(f"Raw row {idx}: {row}")
+                
+                # Create clean row
+                company_data = {}
+                
+                # Process each key-value pair
                 for key, value in row.items():
-                    # Skip empty keys
                     if not key:
                         continue
                         
-                    # Clean the key (remove BOM and whitespace)
-                    clean_key = key.strip().replace('\ufeff', '')
+                    # Clean BOM from keys
+                    clean_key = key.replace('\ufeff', '')
                     
-                    # Add to cleaned row with cleaned value
-                    cleaned_row[clean_key] = value.strip() if isinstance(value, str) else value
+                    # Clean and convert values
+                    if isinstance(value, str):
+                        clean_value = value.strip()
+                    else:
+                        clean_value = value
+                        
+                    company_data[clean_key] = clean_value
                 
-                # Use the cleaned row data
-                company_data = cleaned_row
-                
-                # Log the company data
-                logger.info(f"Processing company data: {company_data}")
+                # Log the company data for debugging
+                logger.info(f"Processing row {idx}, ticker: {company_data.get('ticker')}, name: {company_data.get('name')}")
                 
                 # Check for required fields
-                if not company_data.get('ticker') or not company_data.get('name'):
-                    error_msg = f"Row missing required fields (ticker, name): {company_data}"
+                if 'ticker' not in company_data or not company_data.get('ticker'):
+                    error_msg = f"Row {idx} missing ticker field. Keys: {list(company_data.keys())}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    continue
+                    
+                if 'name' not in company_data or not company_data.get('name'):
+                    error_msg = f"Row {idx} missing name field. Keys: {list(company_data.keys())}"
                     logger.error(error_msg)
                     errors.append(error_msg)
                     continue
@@ -269,17 +306,16 @@ async def upload_companies_csv(file: UploadFile = File(...)):
                     companies_added += 1
                     
             except Exception as e:
-                error_msg = f"Error processing row: {str(e)}"
+                error_msg = f"Error processing row {idx}: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
         
-        logger.info(f"CSV processing complete: {companies_added} added, {companies_updated} updated, {len(errors)} errors")
-        
         return {
-            "message": "CSV processed successfully",
+            "status": "success",
             "companies_added": companies_added,
             "companies_updated": companies_updated,
-            "errors": errors
+            "errors": errors,
+            "message": "CSV processed successfully",
         }
         
     except Exception as e:
