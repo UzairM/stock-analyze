@@ -38,16 +38,57 @@ const CompanyDetail = () => {
       setAnalyzing(true);
       setError(null);
       
-      // Use the direct analysis endpoint instead of the Celery task
+      // Show a message to the user
+      console.log('Starting analysis...');
+      
+      // Use the direct analysis endpoint 
       const response = await axios.post(`${API_URL}/analyses/ticker/${id}`);
+      console.log('Analysis started:', response.data);
       
       // Add the new analysis to the analyses array
       if (response.data) {
         setAnalyses(prevAnalyses => [response.data, ...prevAnalyses]);
+        
+        // Poll for status updates every 5 seconds
+        const checkStatus = async () => {
+          try {
+            // Get the analysis ID from the response
+            const analysisId = response.data._id;
+            
+            // Get the latest status
+            const statusResponse = await axios.get(`${API_URL}/analyses/${analysisId}`);
+            console.log('Analysis status:', statusResponse.data);
+            
+            // Update the analysis in the list
+            const updatedAnalysis = statusResponse.data;
+            setAnalyses(prevAnalyses => 
+              prevAnalyses.map(analysis => 
+                analysis._id === analysisId ? updatedAnalysis : analysis
+              )
+            );
+            
+            // Check if the analysis is complete
+            const status = updatedAnalysis.status || '';
+            if (status === 'completed' || status === 'failed') {
+              setAnalyzing(false);
+              console.log('Analysis complete:', status);
+            } else {
+              // Check again in 5 seconds
+              setTimeout(checkStatus, 5000);
+            }
+          } catch (err) {
+            console.error('Error checking status:', err);
+            setAnalyzing(false);
+          }
+        };
+        
+        // Start checking status
+        checkStatus();
+      } else {
+        setAnalyzing(false);
       }
-      
-      setAnalyzing(false);
     } catch (err) {
+      console.error('Analysis error:', err);
       setError('Error performing analysis: ' + (err.response?.data?.detail || err.message));
       setAnalyzing(false);
     }
@@ -148,7 +189,7 @@ const CompanyDetail = () => {
         {analyzing && (
           <div className="analysis-status">
             <h3>Analysis in Progress</h3>
-            <p>Analyzing SEC filings. This may take a minute...</p>
+            <p>Analyzing SEC filings. This may take several minutes...</p>
           </div>
         )}
         
@@ -158,9 +199,6 @@ const CompanyDetail = () => {
             <div className="analysis-details">
               <div className="analysis-item">
                 <strong>Stock Expected to Go Up:</strong> {latestAnalysis.analysis_result.stock_expected_to_go_up ? 'Yes' : 'No'}
-              </div>
-              <div className="analysis-item">
-                <strong>Expected By:</strong> {latestAnalysis.analysis_result.expected_by_date ? new Date(latestAnalysis.analysis_result.expected_by_date).toLocaleDateString() : 'N/A'}
               </div>
               <div className="analysis-item">
                 <strong>Good Buy:</strong> {latestAnalysis.analysis_result.is_good_buy ? 'Yes' : 'No'}

@@ -20,50 +20,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Redis service for Celery
-  redis:
-    image: redis:latest
-    container_name: redis
-    restart: always
-    ports:
-      - "6379:6379"
-    networks:
-      - app-network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Celery worker service
-  celery_worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: celery_worker
-    restart: always
-    command: >
-      bash -c "celery -A app.utils.celery_app worker --loglevel=DEBUG -E --concurrency=2
-      && echo 'Celery worker exited'"
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - redis
-      - mongodb
-    environment:
-      - MONGO_URL=mongodb://mongodb:27017
-      - DB_NAME=biotech_analysis_db
-      - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - PYTHONUNBUFFERED=1
-    networks:
-      - app-network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   # FastAPI backend service
   backend:
     build:
@@ -77,11 +33,9 @@ services:
       - ./backend:/app
     depends_on:
       - mongodb
-      - redis
     environment:
       - MONGO_URL=mongodb://mongodb:27017
       - DB_NAME=biotech_analysis_db
-      - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PYTHONUNBUFFERED=1
     networks:
@@ -107,7 +61,7 @@ services:
     depends_on:
       - backend
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=${BACKEND_API_URL}
     networks:
       - app-network
     logging:
