@@ -5,10 +5,14 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 import csv
 import io
+import logging
 from datetime import datetime
 
 from app.database.connection import get_database
 from app.models.company import Company, CompanyCreate, CompanyUpdate
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/companies",
@@ -169,7 +173,10 @@ async def upload_companies_csv(file: UploadFile = File(...)):
     """
     db = get_database()
     
+    logger.info(f"Received CSV upload: {file.filename}")
+    
     if not file.filename.endswith('.csv'):
+        logger.error(f"Invalid file type: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must be a CSV"
@@ -188,14 +195,22 @@ async def upload_companies_csv(file: UploadFile = File(...)):
         companies_updated = 0
         errors = []
         
+        # Log CSV headers
+        logger.info(f"CSV headers: {csv_reader.fieldnames}")
+        
         for row in csv_reader:
             try:
                 # Clean up the row data
                 company_data = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items() if k}
                 
+                # Log the company data
+                logger.info(f"Processing company data: {company_data}")
+                
                 # Check for required fields
                 if not company_data.get('ticker') or not company_data.get('name'):
-                    errors.append(f"Row missing required fields (ticker, name): {company_data}")
+                    error_msg = f"Row missing required fields (ticker, name): {company_data}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
                     continue
                 
                 # Convert numeric fields
@@ -207,6 +222,7 @@ async def upload_companies_csv(file: UploadFile = File(...)):
                         try:
                             company_data[field] = float(company_data[field])
                         except ValueError:
+                            logger.warning(f"Could not convert {field} to float: {company_data[field]}")
                             company_data[field] = None
                 
                 # Check if company already exists
@@ -214,6 +230,7 @@ async def upload_companies_csv(file: UploadFile = File(...)):
                 
                 if existing_company:
                     # Update existing company
+                    logger.info(f"Updating company {company_data['ticker']}")
                     company_data['updated_at'] = datetime.utcnow()
                     await db.companies.update_one(
                         {"_id": existing_company["_id"]},
@@ -222,16 +239,22 @@ async def upload_companies_csv(file: UploadFile = File(...)):
                     companies_updated += 1
                 else:
                     # Add created_at and updated_at fields
+                    logger.info(f"Adding new company {company_data['ticker']}")
                     now = datetime.utcnow()
                     company_data['created_at'] = now
                     company_data['updated_at'] = now
                     
                     # Insert new company
-                    await db.companies.insert_one(company_data)
+                    result = await db.companies.insert_one(company_data)
+                    logger.info(f"Inserted company with ID: {result.inserted_id}")
                     companies_added += 1
                     
             except Exception as e:
-                errors.append(f"Error processing row: {str(e)}")
+                error_msg = f"Error processing row: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+        
+        logger.info(f"CSV processing complete: {companies_added} added, {companies_updated} updated, {len(errors)} errors")
         
         return {
             "message": "CSV processed successfully",
@@ -241,7 +264,9 @@ async def upload_companies_csv(file: UploadFile = File(...)):
         }
         
     except Exception as e:
+        error_msg = f"Error processing CSV: {str(e)}"
+        logger.error(error_msg)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing CSV: {str(e)}"
+            detail=error_msg
         ) 
